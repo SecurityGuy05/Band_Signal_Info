@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Viewport matches the SVG's 512x512 coordinate space so all path data
+    can be used verbatim without rescaling.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Signal arc 1 — innermost, thickest -->
+    <path
+        android:pathData="M 176,198 A 80,80 0 0,1 336,198"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="18"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Signal arc 2 -->
+    <path
+        android:pathData="M 136,232 A 120,120 0 0,1 376,232"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="14"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Signal arc 3 — outermost, thinnest -->
+    <path
+        android:pathData="M 96,268 A 160,160 0 0,1 416,268"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Antenna tip dot -->
+    <path
+        android:pathData="M 256,182 A 16,16 0 0,1 272,198 A 16,16 0 0,1 256,214 A 16,16 0 0,1 240,198 A 16,16 0 0,1 256,182 Z"
+        android:fillColor="#BBDEFB" />
+
+    <!-- Center mast -->
+    <path
+        android:pathData="M 256,198 L 256,400"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="14"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Crossbar top -->
+    <path
+        android:pathData="M 198,300 L 314,300"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="12"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Crossbar middle -->
+    <path
+        android:pathData="M 216,340 L 296,340"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="12"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Crossbar bottom -->
+    <path
+        android:pathData="M 230,374 L 282,374"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Left leg -->
+    <path
+        android:pathData="M 198,300 L 168,400"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="12"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Right leg -->
+    <path
+        android:pathData="M 314,300 L 344,400"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="12"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Base platform (rounded rect x=148 y=398 w=216 h=24 rx=8) -->
+    <path
+        android:pathData="M 156,398 H 356 A 8,8 0 0,1 364,406 V 414 A 8,8 0 0,1 356,422 H 156 A 8,8 0 0,1 148,414 V 406 A 8,8 0 0,1 156,398 Z"
+        android:fillColor="#0D47A1" />
+
+</vector>
