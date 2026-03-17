@@ -104,7 +104,7 @@ fun CellInfoScreen() {
     // Google Play Prominent Disclosure Requirement
     if (showDisclosure && !hasLocationPermission) {
         AlertDialog(
-            onDismissRequest = { /* Require choice */ },
+            onDismissRequest = { showDisclosure = false },
             title = { Text("Location Access Disclosure", style = MaterialTheme.typography.titleMedium) },
             text = {
                 Column {
@@ -540,16 +540,14 @@ fun MiniStat(label: String, value: String) {
 
 @Composable
 fun ThermalStatusRow(status: Int) {
-    // status corresponds directly to Samsung's TM level shown in field test mode
-    // TM 0 = THERMAL_STATUS_NONE = not throttled
     val (label, dotColor) = when (status) {
-        0 -> "Not Throttled" to Color(0xFF4CAF50)       // TM 0 – green
-        1 -> "Light Throttling" to Color(0xFFCDDC39)    // TM 1 – yellow-green
-        2 -> "Moderate Throttling" to Color(0xFFFF9800) // TM 2 – orange
-        3 -> "Severe Throttling" to Color(0xFFF44336)   // TM 3 – red
-        4 -> "Critical Throttling" to Color(0xFFB71C1C) // TM 4 – dark red
-        5 -> "Emergency" to Color(0xFF880E4F)            // TM 5 – purple-red
-        6 -> "Shutdown Imminent" to Color(0xFF212121)   // TM 6 – near-black
+        0 -> "Not Throttled" to Color(0xFF4CAF50)
+        1 -> "Light Throttling" to Color(0xFFCDDC39)
+        2 -> "Moderate Throttling" to Color(0xFFFF9800)
+        3 -> "Severe Throttling" to Color(0xFFF44336)
+        4 -> "Critical Throttling" to Color(0xFFB71C1C)
+        5 -> "Emergency" to Color(0xFF880E4F)
+        6 -> "Shutdown Imminent" to Color(0xFF212121)
         else -> "Unknown" to Color.Gray
     }
     Row(
@@ -572,7 +570,7 @@ fun ThermalStatusRow(status: Int) {
                 color = dotColor
             ) {}
             Text(
-                "TM $status  –  $label",
+                "TM $status – $label",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Medium,
                 color = dotColor
