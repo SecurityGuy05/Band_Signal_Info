@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.telephony.*
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -22,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -85,6 +87,7 @@ fun CellInfoScreen() {
 
     var cells by remember { mutableStateOf<List<CellData>>(emptyList()) }
     var providerName by remember { mutableStateOf("") }
+    var thermalStatus by remember { mutableIntStateOf(-1) }
     var refreshSeconds by remember { mutableLongStateOf(1L) }
     var showSettings by remember { mutableStateOf(false) }
     var showDisclosure by remember { mutableStateOf(!hasLocationPermission) }
@@ -155,6 +158,10 @@ fun CellInfoScreen() {
                 providerName = provider
                 val raw = try { tm.allCellInfo } catch (_: Exception) { null }
                 cells = raw?.mapNotNull { parseCellInfo(it, provider) } ?: emptyList()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                    thermalStatus = pm.currentThermalStatus
+                }
                 delay(refreshSeconds * 1000)
             }
         }
@@ -237,6 +244,10 @@ fun CellInfoScreen() {
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
+                if (thermalStatus >= 0) {
+                    item { ThermalStatusRow(thermalStatus) }
+                }
+
                 if (cells.isEmpty()) {
                     item {
                         Text(
@@ -524,5 +535,48 @@ fun MiniStat(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
         Text(value, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+fun ThermalStatusRow(status: Int) {
+    // status corresponds directly to Samsung's TM level shown in field test mode
+    // TM 0 = THERMAL_STATUS_NONE = not throttled
+    val (label, dotColor) = when (status) {
+        0 -> "Not Throttled" to Color(0xFF4CAF50)       // TM 0 – green
+        1 -> "Light Throttling" to Color(0xFFCDDC39)    // TM 1 – yellow-green
+        2 -> "Moderate Throttling" to Color(0xFFFF9800) // TM 2 – orange
+        3 -> "Severe Throttling" to Color(0xFFF44336)   // TM 3 – red
+        4 -> "Critical Throttling" to Color(0xFFB71C1C) // TM 4 – dark red
+        5 -> "Emergency" to Color(0xFF880E4F)            // TM 5 – purple-red
+        6 -> "Shutdown Imminent" to Color(0xFF212121)   // TM 6 – near-black
+        else -> "Unknown" to Color.Gray
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            "THERMAL",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(start = 2.dp)
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Surface(
+                modifier = Modifier.size(8.dp),
+                shape = MaterialTheme.shapes.small,
+                color = dotColor
+            ) {}
+            Text(
+                "TM $status  –  $label",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = dotColor
+            )
+        }
     }
 }
