@@ -85,12 +85,23 @@ fun CellInfoScreen() {
         )
     }
 
+    val prefs = remember { context.getSharedPreferences("band_signal_prefs", Context.MODE_PRIVATE) }
+
     var cells by remember { mutableStateOf<List<CellData>>(emptyList()) }
     var providerName by remember { mutableStateOf("") }
     var thermalStatus by remember { mutableIntStateOf(-1) }
     var refreshSeconds by remember { mutableLongStateOf(1L) }
     var showSettings by remember { mutableStateOf(false) }
     var showDisclosure by remember { mutableStateOf(!hasLocationPermission) }
+    var startOnBoot by remember { mutableStateOf(prefs.getBoolean("start_on_boot", false)) }
+    var hasBackgroundLocation by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
 
     val darkTheme = isSystemInDarkTheme()
     val carrierScheme = remember(providerName, darkTheme) { carrierColorScheme(providerName, darkTheme) }
@@ -99,6 +110,12 @@ fun CellInfoScreen() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         hasLocationPermission = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+    }
+
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasBackgroundLocation = granted
     }
 
     // Google Play Prominent Disclosure Requirement
@@ -185,6 +202,33 @@ fun CellInfoScreen() {
                             )
                             Text(label, style = MaterialTheme.typography.bodyMedium)
                         }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Start at Boot", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            if (startOnBoot && !hasBackgroundLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                Text(
+                                    "\"Allow all the time\" location needed",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = startOnBoot,
+                            onCheckedChange = { checked ->
+                                startOnBoot = checked
+                                prefs.edit().putBoolean("start_on_boot", checked).apply()
+                                if (checked && !hasBackgroundLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                                }
+                            }
+                        )
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     TextButton(
