@@ -1,5 +1,7 @@
+@file:Suppress("UNUSED_VALUE")
 package com.example.bandsignalinfo
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -30,9 +32,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import com.example.bandsignalinfo.ui.theme.BandSignalInfoTheme
 import com.example.bandsignalinfo.ui.theme.carrierColorScheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 data class CellData(
     val type: String,
@@ -87,8 +92,10 @@ fun CellInfoScreen() {
 
     val prefs = remember { context.getSharedPreferences("band_signal_prefs", Context.MODE_PRIVATE) }
 
-    var cells by remember { mutableStateOf<List<CellData>>(emptyList()) }
-    var providerName by remember { mutableStateOf("") }
+    var simCount by remember { mutableIntStateOf(1) }
+    var selectedSim by remember { mutableIntStateOf(0) }
+    var cellsBySim by remember { mutableStateOf<Map<Int, List<CellData>>>(emptyMap()) }
+    var providerBySim by remember { mutableStateOf(mapOf(0 to "")) }
     var thermalStatus by remember { mutableIntStateOf(-1) }
     var refreshSeconds by remember { mutableLongStateOf(1L) }
     var showSettings by remember { mutableStateOf(false) }
@@ -103,6 +110,8 @@ fun CellInfoScreen() {
         )
     }
 
+    val cells = cellsBySim[selectedSim] ?: emptyList()
+    val providerName = providerBySim[selectedSim] ?: ""
     val darkTheme = isSystemInDarkTheme()
     val carrierScheme = remember(providerName, darkTheme) { carrierColorScheme(providerName, darkTheme) }
 
@@ -171,10 +180,38 @@ fun CellInfoScreen() {
         if (hasLocationPermission) {
             while (true) {
                 val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-                val provider = tm.networkOperatorName.takeIf { it.isNotBlank() } ?: "Unknown"
-                providerName = provider
-                val raw = try { tm.allCellInfo } catch (_: Exception) { null }
-                cells = raw?.mapNotNull { parseCellInfo(it, provider) } ?: emptyList()
+                val sm = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+                val subs = try { sm.activeSubscriptionInfoList } catch (_: Exception) { null }
+                if (subs != null && subs.size >= 2) {
+                    simCount = subs.size.coerceAtMost(2)
+                    val newCells = mutableMapOf<Int, List<CellData>>()
+                    val newProviders = mutableMapOf<Int, String>()
+                    subs.take(2).forEachIndexed { idx, sub ->
+                        val subTm = tm.createForSubscriptionId(sub.subscriptionId)
+                        val provider = subTm.networkOperatorName.takeIf { it.isNotBlank() } ?: "SIM ${idx + 1}"
+                        val mccMnc = subTm.networkOperator
+                        newProviders[idx] = provider
+                        // requestCellInfoUpdate on a sub-specific TM returns fully-populated
+                        // identities (MCC+MNC on neighbors), so Verizon B66 and T-Mobile B66
+                        // each carry the right operator code and are correctly separated.
+                        val raw = requestCellInfoAsync(subTm, context)
+                        newCells[idx] = raw?.filter { cellInfo ->
+                            // If MCC+MNC is present it must match — catches stray cells on
+                            // devices whose sub-specific TM still returns a mixed pool.
+                            // If absent (e.g. NR NSA secondary), trust the sub-specific TM.
+                            val cellNetwork = cellMccMnc(cellInfo)
+                            cellNetwork == null || cellNetwork == mccMnc
+                        }?.mapNotNull { parseCellInfo(it, provider) } ?: emptyList()
+                    }
+                    cellsBySim = newCells
+                    providerBySim = newProviders
+                } else {
+                    simCount = 1
+                    val provider = tm.networkOperatorName.takeIf { it.isNotBlank() } ?: "Unknown"
+                    val raw = requestCellInfoAsync(tm, context)
+                    cellsBySim = mapOf(0 to (raw?.mapNotNull { parseCellInfo(it, provider) } ?: emptyList()))
+                    providerBySim = mapOf(0 to provider)
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
                     thermalStatus = pm.currentThermalStatus
@@ -223,7 +260,7 @@ fun CellInfoScreen() {
                             checked = startOnBoot,
                             onCheckedChange = { checked ->
                                 startOnBoot = checked
-                                prefs.edit().putBoolean("start_on_boot", checked).apply()
+                                prefs.edit { putBoolean("start_on_boot", checked) }
                                 if (checked && !hasBackgroundLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                     backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                                 }
@@ -283,8 +320,20 @@ fun CellInfoScreen() {
             val primaryCells = listOfNotNull(nrCell, lteCell)
             val neighborCells = cells.filter { it !in primaryCells }
 
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (simCount >= 2) {
+                TabRow(selectedTabIndex = selectedSim) {
+                    providerBySim.entries.sortedBy { it.key }.forEach { (idx, name) ->
+                        Tab(
+                            selected = selectedSim == idx,
+                            onClick = { selectedSim = idx },
+                            text = { Text("SIM ${idx + 1}  $name", style = MaterialTheme.typography.labelMedium) }
+                        )
+                    }
+                }
+            }
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
@@ -327,9 +376,90 @@ fun CellInfoScreen() {
                     items(neighborCells) { cell -> NeighborCellCard(cell) }
                 }
             }
+            } // end Column
         }
     }
     } // end MaterialTheme(carrierScheme)
+}
+
+// Use requestCellInfoUpdate (API 29+) on a subscription-specific TM so the modem
+// returns fully-populated cell identities (including MCC+MNC for neighbors).
+// Falls back to allCellInfo on older devices.
+@SuppressLint("MissingPermission")
+suspend fun requestCellInfoAsync(tm: TelephonyManager, context: Context): List<CellInfo>? {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        suspendCancellableCoroutine { cont ->
+            try {
+                tm.requestCellInfoUpdate(
+                    ContextCompat.getMainExecutor(context),
+                    object : TelephonyManager.CellInfoCallback() {
+                        override fun onCellInfo(cellInfo: List<CellInfo>) {
+                            if (cont.isActive) cont.resume(cellInfo)
+                        }
+                        override fun onError(errorCode: Int, detail: Throwable?) {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    }
+                )
+            } catch (_: Exception) {
+                if (cont.isActive) cont.resume(null)
+            }
+        }
+    } else {
+        try { tm.allCellInfo } catch (_: Exception) { null }
+    }
+}
+
+
+fun cellMccMnc(cellInfo: CellInfo): String? {
+    val unavail = Int.MAX_VALUE
+    return when (cellInfo) {
+        is CellInfoLte -> {
+            val id = cellInfo.cellIdentity
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val mcc = id.mccString ?: return null
+                val mnc = id.mncString ?: return null
+                "$mcc$mnc"
+            } else {
+                val mcc = id.mcc.takeIf { it != unavail } ?: return null
+                val mnc = id.mnc.takeIf { it != unavail } ?: return null
+                "$mcc$mnc"
+            }
+        }
+        else -> when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && cellInfo is CellInfoNr -> {
+                val id = cellInfo.cellIdentity as CellIdentityNr
+                val mcc = id.mccString ?: return null
+                val mnc = id.mncString ?: return null
+                "$mcc$mnc"
+            }
+            cellInfo is CellInfoWcdma -> {
+                val id = cellInfo.cellIdentity
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val mcc = id.mccString ?: return null
+                    val mnc = id.mncString ?: return null
+                    "$mcc$mnc"
+                } else {
+                    val mcc = id.mcc.takeIf { it != unavail } ?: return null
+                    val mnc = id.mnc.takeIf { it != unavail } ?: return null
+                    "$mcc$mnc"
+                }
+            }
+            cellInfo is CellInfoGsm -> {
+                val id = cellInfo.cellIdentity
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val mcc = id.mccString ?: return null
+                    val mnc = id.mncString ?: return null
+                    "$mcc$mnc"
+                } else {
+                    val mcc = id.mcc.takeIf { it != unavail } ?: return null
+                    val mnc = id.mnc.takeIf { it != unavail } ?: return null
+                    "$mcc$mnc"
+                }
+            }
+            else -> null
+        }
+    }
 }
 
 fun parseCellInfo(cellInfo: CellInfo, provider: String): CellData? {
