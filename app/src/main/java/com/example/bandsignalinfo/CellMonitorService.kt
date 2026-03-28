@@ -108,6 +108,23 @@ class CellMonitorService : Service() {
 
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.notify(NOTIFICATION_ID, buildNotification("$carrier  ·  $title", text))
+
+            val mode = when {
+                nrCell != null && lteCell != null -> "NSA"
+                nrCell != null -> "SA"
+                else -> ""
+            }
+            val bandText = when {
+                nrCell != null && lteCell != null -> "${lteCell.band} + ${nrCell.band}"
+                nrCell != null -> nrCell.band
+                lteCell != null -> lteCell.band
+                else -> "—"
+            }
+            val rsrp = when {
+                nrCell != null && lteCell != null -> "${lteCell.rsrp} + ${nrCell.rsrp}"
+                else -> (nrCell ?: lteCell)?.rsrp ?: ""
+            }
+            BandWidgetProvider.pushUpdate(this, mode, bandText, rsrp, carrier)
         } catch (_: Exception) {
         }
     }

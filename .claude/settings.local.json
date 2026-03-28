@@ -5,7 +5,8 @@
       "Bash(adb logcat:*)",
       "Bash(adb devices:*)",
       "Bash(./gradlew assembleDebug)",
-      "Bash(adb install:*)"
+      "Bash(adb install:*)",
+      "Bash(find /c/Users/accou/AndroidStudioProjects/BandSignalInfo/app/src/main -type f \\\\\\(-name *.kt -o -name *.xml \\\\\\))"
     ]
   }
 }

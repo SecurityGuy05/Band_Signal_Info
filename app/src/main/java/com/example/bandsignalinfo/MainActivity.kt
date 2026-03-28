@@ -20,6 +20,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,6 +42,7 @@ import com.example.bandsignalinfo.ui.theme.carrierColorScheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import kotlin.math.roundToInt
 
 data class CellData(
     val type: String,
@@ -50,6 +55,11 @@ data class CellData(
     val tac: String = "N/A",
     val arfcn: String = "N/A",
     val arfcnLabel: String = "EARFCN",
+    val ci: String = "N/A",
+    val ciLabel: String = "CI",
+    val mcc: String = "N/A",
+    val mnc: String = "N/A",
+    val sinr: String = "N/A",
 )
 
 val REFRESH_OPTIONS = listOf(1L to "1s", 2L to "2s", 5L to "5s", 10L to "10s", 30L to "30s")
@@ -101,6 +111,7 @@ fun CellInfoScreen() {
     var showSettings by remember { mutableStateOf(false) }
     var showDisclosure by remember { mutableStateOf(!hasLocationPermission) }
     var startOnBoot by remember { mutableStateOf(prefs.getBoolean("start_on_boot", false)) }
+    var showSignalScore by remember { mutableStateOf(prefs.getBoolean("show_signal_score", true)) }
     var hasBackgroundLocation by remember {
         mutableStateOf(
             Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
@@ -268,12 +279,36 @@ fun CellInfoScreen() {
                         )
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Signal Score", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            Text("0–100 score from RSRP + RSRQ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                        }
+                        Switch(
+                            checked = showSignalScore,
+                            onCheckedChange = { checked ->
+                                showSignalScore = checked
+                                prefs.edit { putBoolean("show_signal_score", checked) }
+                            }
+                        )
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     TextButton(
                         onClick = { uriHandler.openUri(PRIVACY_POLICY_URL) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Privacy Policy", modifier = Modifier.fillMaxWidth())
                     }
+                    Text(
+                        "Version 1.5",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    )
                 }
             },
             confirmButton = {
@@ -361,7 +396,14 @@ fun CellInfoScreen() {
                             modifier = Modifier.padding(start = 2.dp, bottom = 1.dp)
                         )
                     }
-                    items(primaryCells) { cell -> ServingCellCard(cell) }
+                    val nrMode = when {
+                        nrCell != null && lteCell != null -> "NSA"
+                        nrCell != null -> "SA"
+                        else -> ""
+                    }
+                    items(primaryCells) { cell ->
+                        ServingCellCard(cell, if (cell.type == "NR (5G)") nrMode else "", showSignalScore)
+                    }
                 }
 
                 if (neighborCells.isNotEmpty()) {
@@ -476,6 +518,15 @@ fun parseCellInfo(cellInfo: CellInfo, provider: String): CellData? {
             val rsrpVal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) sig.rsrp else sig.dbm
             val rsrqVal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) sig.rsrq else unavail
 
+            val lteMcc: String
+            val lteMnc: String
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                lteMcc = id.mccString ?: "N/A"
+                lteMnc = id.mncString ?: "N/A"
+            } else {
+                lteMcc = id.mcc.takeIf { it != unavail }?.toString() ?: "N/A"
+                lteMnc = id.mnc.takeIf { it != unavail }?.toString() ?: "N/A"
+            }
             CellData(
                 type = "LTE",
                 isServing = cellInfo.isRegistered,
@@ -486,7 +537,12 @@ fun parseCellInfo(cellInfo: CellInfo, provider: String): CellData? {
                 pci = id.pci.takeIf { it != unavail }?.toString() ?: "N/A",
                 tac = id.tac.takeIf { it != unavail }?.toString() ?: "N/A",
                 arfcn = earfcn.takeIf { it != unavail }?.toString() ?: "N/A",
-                arfcnLabel = "EARFCN"
+                arfcnLabel = "EARFCN",
+                ci = id.ci.takeIf { it != unavail }?.toString() ?: "N/A",
+                ciLabel = "CI",
+                mcc = lteMcc,
+                mnc = lteMnc,
+                sinr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) sig.rssnr.takeIf { it != unavail }?.let { "$it dB" } ?: "N/A" else "N/A",
             )
         }
         else -> {
@@ -513,11 +569,25 @@ fun parseCellInfo(cellInfo: CellInfo, provider: String): CellData? {
                     pci = id.pci.takeIf { it != unavail }?.toString() ?: "N/A",
                     tac = tac,
                     arfcn = nrarfcn.takeIf { it != unavail }?.toString() ?: "N/A",
-                    arfcnLabel = "NR-ARFCN"
+                    arfcnLabel = "NR-ARFCN",
+                    ci = id.nci.takeIf { it != Long.MAX_VALUE }?.toString() ?: "N/A",
+                    ciLabel = "NCI",
+                    mcc = id.mccString ?: "N/A",
+                    mnc = id.mncString ?: "N/A",
+                    sinr = sig.ssSinr.takeIf { it != unavail }?.let { "$it dB" } ?: "N/A",
                 )
             } else if (cellInfo is CellInfoWcdma) {
                 val id = cellInfo.cellIdentity
                 val sig = cellInfo.cellSignalStrength
+                val wcdmaMcc: String
+                val wcdmaMnc: String
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    wcdmaMcc = id.mccString ?: "N/A"
+                    wcdmaMnc = id.mncString ?: "N/A"
+                } else {
+                    wcdmaMcc = id.mcc.takeIf { it != unavail }?.toString() ?: "N/A"
+                    wcdmaMnc = id.mnc.takeIf { it != unavail }?.toString() ?: "N/A"
+                }
                 CellData(
                     type = "WCDMA", isServing = cellInfo.isRegistered, provider = provider,
                     band = "N/A",
@@ -526,11 +596,24 @@ fun parseCellInfo(cellInfo: CellInfo, provider: String): CellData? {
                     pci = id.psc.takeIf { it != unavail }?.toString() ?: "N/A",
                     tac = id.lac.takeIf { it != unavail }?.toString() ?: "N/A",
                     arfcn = id.uarfcn.takeIf { it != unavail }?.toString() ?: "N/A",
-                    arfcnLabel = "UARFCN"
+                    arfcnLabel = "UARFCN",
+                    ci = id.cid.takeIf { it != unavail }?.toString() ?: "N/A",
+                    ciLabel = "CID",
+                    mcc = wcdmaMcc,
+                    mnc = wcdmaMnc,
                 )
             } else if (cellInfo is CellInfoGsm) {
                 val id = cellInfo.cellIdentity
                 val sig = cellInfo.cellSignalStrength
+                val gsmMcc: String
+                val gsmMnc: String
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    gsmMcc = id.mccString ?: "N/A"
+                    gsmMnc = id.mncString ?: "N/A"
+                } else {
+                    gsmMcc = id.mcc.takeIf { it != unavail }?.toString() ?: "N/A"
+                    gsmMnc = id.mnc.takeIf { it != unavail }?.toString() ?: "N/A"
+                }
                 CellData(
                     type = "GSM", isServing = cellInfo.isRegistered, provider = provider,
                     band = "N/A",
@@ -539,7 +622,11 @@ fun parseCellInfo(cellInfo: CellInfo, provider: String): CellData? {
                     pci = id.bsic.takeIf { it != unavail }?.toString() ?: "N/A",
                     tac = id.lac.takeIf { it != unavail }?.toString() ?: "N/A",
                     arfcn = id.arfcn.takeIf { it != unavail }?.toString() ?: "N/A",
-                    arfcnLabel = "ARFCN"
+                    arfcnLabel = "ARFCN",
+                    ci = id.cid.takeIf { it != unavail }?.toString() ?: "N/A",
+                    ciLabel = "CID",
+                    mcc = gsmMcc,
+                    mnc = gsmMnc,
                 )
             } else null
         }
@@ -632,10 +719,28 @@ fun earfcnToLteBand(earfcn: Int): String {
     return table.firstOrNull { earfcn in it.second }?.let { "B${it.first}" } ?: "B?"
 }
 
+// RSRP: -120 dBm = 0, -80 dBm = 100  (real-world range; anything above -80 is excellent)
+// RSRQ:  -15 dB  = 0,  -5 dB = 100
+// Weighted 70 / 30; falls back to RSRP-only when RSRQ is unavailable.
+fun computeSignalScore(rsrp: String, rsrq: String): Int? {
+    val rsrpVal = rsrp.removeSuffix(" dBm").toIntOrNull() ?: return null
+    val rsrpScore = ((rsrpVal + 120).toFloat() / 40f * 100f).coerceIn(0f, 100f)
+    val rsrqVal = rsrq.removeSuffix(" dB").toIntOrNull()
+    return if (rsrqVal != null) {
+        val rsrqScore = ((rsrqVal + 15).toFloat() / 10f * 100f).coerceIn(0f, 100f)
+        (rsrpScore * 0.7f + rsrqScore * 0.3f).roundToInt()
+    } else {
+        rsrpScore.roundToInt()
+    }
+}
+
 @Composable
-fun ServingCellCard(cell: CellData) {
+fun ServingCellCard(cell: CellData, nrMode: String = "", showSignalScore: Boolean = false) {
+    var expanded by remember { mutableStateOf(false) }
+    val plmn = if (cell.mcc != "N/A" && cell.mnc != "N/A") "${cell.mcc}-${cell.mnc}" else "N/A"
+    val score = if (showSignalScore) computeSignalScore(cell.rsrp, cell.rsrq) else null
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
@@ -645,46 +750,138 @@ fun ServingCellCard(cell: CellData) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(cell.type, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                Text(cell.band, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(cell.type, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    if (nrMode.isNotEmpty()) {
+                        Surface(
+                            shape = MaterialTheme.shapes.extraSmall,
+                            color = if (nrMode == "SA") MaterialTheme.colorScheme.tertiaryContainer
+                                    else MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Text(
+                                nrMode,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (nrMode == "SA") MaterialTheme.colorScheme.onTertiaryContainer
+                                        else MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(cell.band, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (expanded) "Collapse" else "Expand",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
             }
             Spacer(Modifier.height(4.dp))
+            if (score != null) {
+                val scoreColor = when {
+                    score >= 67 -> Color(0xFF4CAF50)
+                    score >= 34 -> Color(0xFFFF9800)
+                    else -> MaterialTheme.colorScheme.error
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Signal", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f), modifier = Modifier.width(40.dp))
+                    LinearProgressIndicator(
+                        progress = { score / 100f },
+                        modifier = Modifier.weight(1f).height(5.dp),
+                        color = scoreColor,
+                        trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                        gapSize = 0.dp,
+                        drawStopIndicator = {}
+                    )
+                    Text("$score", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = scoreColor, modifier = Modifier.width(20.dp))
+                }
+            }
             CompactGrid(
                 listOf(
                     "Provider" to cell.provider,
                     "RSRP" to cell.rsrp,
                     "RSRQ" to cell.rsrq,
+                    "SINR" to cell.sinr,
                     "PCI" to cell.pci,
                     "TAC" to cell.tac,
                     cell.arfcnLabel to cell.arfcn
                 )
             )
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 6.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+                    )
+                    CompactGrid(
+                        listOf(
+                            cell.ciLabel to cell.ci,
+                            "PLMN" to plmn,
+                        )
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
 fun NeighborCellCard(cell: CellData) {
+    var expanded by remember { mutableStateOf(false) }
+    val plmn = if (cell.mcc != "N/A" && cell.mnc != "N/A") "${cell.mcc}-${cell.mnc}" else "N/A"
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.width(56.dp)) {
-                Text(cell.type, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                if (cell.band != "N/A" && cell.band != "B?") {
-                    Text(cell.band, fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.width(56.dp)) {
+                    Text(cell.type, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    if (cell.band != "N/A" && cell.band != "B?") {
+                        Text(cell.band, fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                    }
+                }
+                MiniStat("PCI", cell.pci)
+                MiniStat("RSRP", cell.rsrp)
+                if (cell.rsrq != "N/A") MiniStat("RSRQ", cell.rsrq)
+                MiniStat(cell.arfcnLabel, cell.arfcn)
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+                    )
+                    CompactGrid(
+                        listOf(
+                            cell.ciLabel to cell.ci,
+                            "PLMN" to plmn,
+                            "TAC" to cell.tac,
+                            "SINR" to cell.sinr,
+                        )
+                    )
                 }
             }
-            MiniStat("PCI", cell.pci)
-            MiniStat("RSRP", cell.rsrp)
-            if (cell.rsrq != "N/A") MiniStat("RSRQ", cell.rsrq)
-            MiniStat(cell.arfcnLabel, cell.arfcn)
         }
     }
 }
